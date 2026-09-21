@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Linting
+    continue-on-error: "${{ github.ref != 'refs/heads/master' }}"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      - name: Run black
+        uses: psf/black@stable
+
+  test:
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+    runs-on: ubuntu-latest
+    name: 'Python ${{ matrix.python-version }}'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '${{ matrix.python-version }}'
+      - name: Run tests
+        run: ./test/main.sh
