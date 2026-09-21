@@ -11,47 +11,53 @@ shopt -s inherit_errexit lastpipe
 script_dir="$( dirname -- "${BASH_SOURCE[0]}" )"
 script_dir="$( cd -- "$script_dir" && pwd )"
 readonly script_dir
-export script_dir
 
-run_test_file() (
-    set -o errexit -o nounset -o pipefail
-    shopt -s inherit_errexit lastpipe
+declare -a failed_tests=()
 
-    if [ "$#" -ne 1 ]; then
-        echo "usage: ${FUNCNAME[0]} TEST_FILE" >&2
-        return 1
-    fi
-    local file="$1"
+run_test_file() {
+    local test_file
+    for test_file; do
+        echo
+        echo ======================================================================
+        echo "Running test: $test_file"
+        echo ======================================================================
 
-    source "$script_dir/lib/common.sh"
+        source "$script_dir/lib/common.sh"
+        source "$script_dir/$test_file"
 
-    echo
-    echo ======================================================================
-    echo "Running test: $file"
-    echo ======================================================================
+        echo "Should fail? ${test_should_fail:-No}"
 
-    source "$script_dir/$file"
+        set +e
+        (
+            set -o errexit -o nounset -o pipefail
+            shopt -s inherit_errexit lastpipe
 
-    if [ "$( type -t cleanup_test )" == function ]; then
-        trap cleanup_test EXIT
-    else
-        trap default_cleanup_test EXIT
-    fi
+            if [ "$( type -t cleanup_test )" == function ]; then
+                trap cleanup_test EXIT
+            else
+                trap default_cleanup_test EXIT
+            fi
 
-    if run_test; then
-        echo ----------------------------------------------------------------------
-        echo "OK: $file"
-        echo ----------------------------------------------------------------------
-    else
-        echo ----------------------------------------------------------------------
-        echo "FAIL: $file"
-        echo ----------------------------------------------------------------------
-        return 1
-    fi
-)
+            run_test
+        )
+        local ec="$?"
+        set -e
+
+        if [ "$ec" -eq 0 ] || [ -n "${test_should_fail:+Yes}" ]; then
+            echo ----------------------------------------------------------------------
+            echo "OK: $test_file"
+            echo ----------------------------------------------------------------------
+        else
+            echo ----------------------------------------------------------------------
+            echo "FAIL: $test_file"
+            echo ----------------------------------------------------------------------
+            failed_tests+=("$test_file")
+        fi
+    done
+}
 
 main() {
-    local test_file
+    local -a test_files=()
 
     find "$script_dir" \
         -mindepth 1 \
@@ -61,8 +67,18 @@ main() {
         -regextype posix-basic \
         -printf '%P\0' |
     while IFS= read -d '' -r test_file; do
-        run_test_file "$test_file"
+        test_files+=("$test_file")
     done
+
+    run_test_file ${test_files[@]+"${test_files[@]}"}
+
+    if [ "${#failed_tests[@]}" -gt 0 ]; then
+        echo
+        echo ======================================================================
+        echo "FAILED TESTS:" ${failed_tests[@]+"${failed_tests[@]}"}
+        echo ======================================================================
+        return 1
+    fi
 }
 
 main

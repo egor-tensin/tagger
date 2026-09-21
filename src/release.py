@@ -104,17 +104,19 @@ class Version:
         self._nums = tuple(nums)
 
     @staticmethod
-    def parse(src):
+    def parse(src, strict=False):
+        invalid_msg = f"Invalid version: {src}"
+
         match = re.fullmatch(r"(\d+)(?:\.(\d+)(?:\.(\d+))?)?", src)
         if not match:
-            raise ValueError(f"Invalid version: {src}")
+            if strict:
+                raise ValueError(invalid_msg)
+            else:
+                logging.warning("%s", invalid_msg)
+                return None
         assert len(match.groups()) == 3
 
-        try:
-            nums = [int(n) if n is not None else None for n in match.groups()]
-        except ValueError:
-            raise ValueError(f"Invalid version: {src}")
-
+        nums = [int(n) if n is not None else None for n in match.groups()]
         return Version(nums)
 
     def __str__(self):
@@ -188,7 +190,7 @@ class TagList:
         self._versions = versions
 
     @staticmethod
-    def parse(repo_dir=None, prefix=None):
+    def parse(repo_dir=None, prefix=None, strict=False):
         if repo_dir is None:
             repo_dir = os.getcwd()
         if prefix is None:
@@ -203,16 +205,23 @@ class TagList:
             "refs/tags/",
         ]
         output = run(*cmd)
+        versions = output.splitlines()
 
         strip = f"refs/tags/{prefix}"
-        versions = output.splitlines()
         for version in versions:
             if not version.startswith(strip):
-                raise RuntimeError("Unexpected git for-each-ref output")
+                msg = f"Unexpected git for-each-ref output: {version}"
+                if strict:
+                    raise RuntimeError(msg)
+                else:
+                    logging.warning("%s", msg)
         versions = [version.removeprefix(strip) for version in versions]
-        versions = [Version.parse(version) for version in versions]
+
+        versions = [Version.parse(version, strict=strict) for version in versions]
+        versions = [version for version in versions if version is not None]
         if not versions:
             versions = [TagList.DEFAULT_VERSION]
+
         return TagList(repo_dir, prefix, VersionList(versions))
 
     def release_next(self, scope):
@@ -235,6 +244,7 @@ def parse_args(argv=None):
         metavar="STRING",
         help="""tag prefix ("v" by default)""",
     )
+    parser.add_argument("-s", "--strict", action='store_true', help="error out on malformed tags")
     parser.add_argument(
         "release_scope", choices=ReleaseScope, type=ReleaseScope, help="release scope"
     )
@@ -251,7 +261,7 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     with setup_logging():
-        tags = TagList.parse(args.repo_dir, args.prefix)
+        tags = TagList.parse(args.repo_dir, args.prefix, strict=args.strict)
         tags.release_next(args.release_scope)
     return 0
 

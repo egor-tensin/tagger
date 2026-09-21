@@ -3,6 +3,8 @@
 # For details, see https://github.com/egor-tensin/tagger
 # Distributed under the MIT License.
 
+test_should_fail=
+
 log() {
     local msg
     for msg; do
