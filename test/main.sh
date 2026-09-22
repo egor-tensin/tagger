@@ -32,13 +32,13 @@ run_test_file() {
             set -o errexit -o nounset -o pipefail
             shopt -s inherit_errexit lastpipe
 
-            if [ "$( type -t cleanup_test )" == function ]; then
-                trap cleanup_test EXIT
+            if [ "$( type -t test_cleanup )" == function ]; then
+                trap test_cleanup EXIT
             else
-                trap default_cleanup_test EXIT
+                trap test_cleanup_default EXIT
             fi
 
-            run_test
+            test_run
         )
         local ec="$?"
         set -e

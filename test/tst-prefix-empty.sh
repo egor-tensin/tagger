@@ -1,8 +1,8 @@
-repo=
+test_repo=
 
-run_test() {
-    repo="$( create_temp_repo )"
-    create_simple_tags "$repo" 1 2 2.1
-    run_release_script "$repo" -p '' major
-    validate_tags "$repo" 1,2,2.1,3.0.0
+test_run() {
+    test_repo="$( test_create_repo )"
+    test_create_tags "$test_repo" 1 2 2.1
+    test_run_release_script "$test_repo" -p '' major
+    test_validate_tags "$test_repo" 1,2,2.1,3.0.0
 }

@@ -26,7 +26,7 @@ fail_details() {
     done
 }
 
-create_temp_repo() {
+test_create_repo() {
     local repo
     repo="$( mktemp -d )"
 
@@ -40,7 +40,7 @@ create_temp_repo() {
     log "... OK"
 }
 
-remove_temp_repo() {
+test_remove_repo() {
     local repo
     for repo; do
         log "Removing repository: $repo..."
@@ -49,11 +49,11 @@ remove_temp_repo() {
     done
 }
 
-default_cleanup_test() {
-    [ -n "${repo:+x}" ] && remove_temp_repo "$repo"
+test_cleanup_default() {
+    [ -n "${test_repo:+x}" ] && test_remove_repo "$test_repo"
 }
 
-create_random_commit() {
+test_make_commit() {
     if [ "$#" -ne 1 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR"
         return 1
@@ -71,7 +71,7 @@ create_random_commit() {
     log "... OK"
 }
 
-get_tags() {
+test_get_tags() {
     if [ "$#" -ne 1 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR"
         return 1
@@ -84,7 +84,7 @@ get_tags() {
     log "... OK"
 }
 
-create_simple_tags() {
+test_create_tags() {
     if [ "$#" -lt 1 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR [TAG...]"
         return 1
@@ -104,7 +104,7 @@ create_simple_tags() {
     done
 }
 
-validate_tags() {
+test_validate_tags() {
     if [ "$#" -ne 2 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR EXPECTED_TAGS"
         return 1
@@ -114,7 +114,7 @@ validate_tags() {
     local expected="$2"
 
     local actual
-    actual="$( get_tags "$repo" | paste -s -d ',' )"
+    actual="$( test_get_tags "$repo" | paste -s -d ',' )"
 
     log "Validating tags in $repo..."
 
@@ -129,7 +129,7 @@ validate_tags() {
     return 1
 }
 
-run_release_script() {
+test_run_release_script() {
     if [ "$#" -lt 1 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR [ARG...]"
         return 1
