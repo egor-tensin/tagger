@@ -21,7 +21,7 @@ run_test_file() {
     for test_file; do
         echo
         echo ======================================================================
-        echo "Running test: $test_file"
+        echo "TEST: $test_file"
         echo ======================================================================
 
         source "$script_dir/lib/common.sh"
