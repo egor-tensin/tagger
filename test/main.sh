@@ -12,6 +12,8 @@ script_dir="$( dirname -- "${BASH_SOURCE[0]}" )"
 script_dir="$( cd -- "$script_dir" && pwd )"
 readonly script_dir
 
+numof_ok_tests=0
+numof_failed_tests=0
 declare -a failed_tests=()
 
 run_test_file() {
@@ -47,10 +49,12 @@ run_test_file() {
             echo ----------------------------------------------------------------------
             echo "OK: $test_file"
             echo ----------------------------------------------------------------------
+            numof_ok_tests=$((numof_ok_tests + 1))
         else
             echo ----------------------------------------------------------------------
             echo "FAIL: $test_file"
             echo ----------------------------------------------------------------------
+            numof_failed_tests=$((numof_failed_tests + 1))
             failed_tests+=("$test_file")
         fi
     done
@@ -58,6 +62,7 @@ run_test_file() {
 
 main() {
     local -a test_files=()
+    local test_file
 
     find "$script_dir" \
         -mindepth 1 \
@@ -73,13 +78,22 @@ main() {
 
     run_test_file ${test_files[@]+"${test_files[@]}"}
 
+    local ret=0
+    [ "$numof_failed_tests" -gt 0 ] && ret=1
+
+    echo
+    echo ======================================================================
+    echo SUMMARY
+    echo ======================================================================
+    echo "OK:   $numof_ok_tests"
+    echo "FAIL: $numof_failed_tests"
     if [ "${#failed_tests[@]}" -gt 0 ]; then
-        echo
-        echo ======================================================================
-        echo "FAILED TESTS:" ${failed_tests[@]+"${failed_tests[@]}"}
-        echo ======================================================================
-        return 1
+        for test_file in ${failed_tests[@]+"${failed_tests[@]}"}; do
+            echo "FAIL: $test_file"
+        done
     fi
+    echo ----------------------------------------------------------------------
+    return "$ret"
 }
 
 main
