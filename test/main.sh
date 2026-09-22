@@ -27,7 +27,7 @@ run_test_file() {
         source "$script_dir/lib/common.sh"
         source "$script_dir/$test_file"
 
-        echo "Should fail? ${test_should_fail:-No}"
+        log "Should fail: ${test_should_fail:-No}"
 
         set +e
         (

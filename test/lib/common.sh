@@ -8,7 +8,7 @@ test_should_fail=
 log() {
     local msg
     for msg; do
-        echo "$msg" >&2
+        echo "$test_file | $msg" >&2
     done
 }
 
@@ -36,16 +36,13 @@ test_create_repo() {
     git -C "$repo" init -q
     git -C "$repo" config user.name 'Test user'
     git -C "$repo" config user.email 'test@example.com'
-
-    log "... OK"
 }
 
 test_remove_repo() {
     local repo
     for repo; do
-        log "Removing repository: $repo..."
+        log "Removing repository: $repo"
         rm -rf -- "$repo"
-        log "... OK"
     done
 }
 
@@ -68,7 +65,6 @@ test_make_commit() {
     touch -- "$file"
     git -C "$repo" add "$file"
     git -C "$repo" commit -q -m "$file"
-    log "... OK"
 }
 
 test_get_tags() {
@@ -81,7 +77,6 @@ test_get_tags() {
 
     log "Reading tags in $repo..."
     git -C "$repo" for-each-ref '--format=%(refname)' refs/tags/ | sed -e 's/^refs\/tags\///' | sort -V
-    log "... OK"
 }
 
 test_create_tags() {
@@ -100,7 +95,6 @@ test_create_tags() {
         git -C "$repo" add "$repo/$tag"
         git -C "$repo" commit -q -m "$tag"
         git -C "$repo" tag "$tag"
-        log "... OK"
     done
 }
 
@@ -118,10 +112,7 @@ test_validate_tags() {
 
     log "Validating tags in $repo..."
 
-    if [ "$actual" == "$expected" ]; then
-        log "... OK"
-        return 0
-    fi
+    [ "$actual" == "$expected" ] && return 0
 
     fail "Unexpected tags"
     fail_details "Expected tags: $expected"
@@ -140,5 +131,4 @@ test_run_release_script() {
 
     log "Running release script..."
     "$script_dir/../src/release.py" "$@" "$repo"
-    log "... OK"
 }
