@@ -5,27 +5,6 @@
 
 test_should_fail=
 
-log() {
-    local msg
-    for msg; do
-        echo "$test_file | $msg" >&2
-    done
-}
-
-fail() {
-    local msg
-    for msg; do
-        log "FAIL: $msg"
-    done
-}
-
-fail_details() {
-    local msg
-    for msg; do
-        fail "    $msg"
-    done
-}
-
 test_create_repo() {
     local repo
     repo="$( mktemp -d )"
@@ -76,7 +55,9 @@ test_get_tags() {
     local repo="$1"
 
     log "Reading tags in $repo..."
-    git -C "$repo" for-each-ref '--format=%(refname)' refs/tags/ | sed -e 's/^refs\/tags\///' | sort -V
+    git -C "$repo" for-each-ref '--format=%(refname)' refs/tags/ \
+        | sed -e 's/^refs\/tags\///' \
+        | sort -V
 }
 
 test_create_tags() {
