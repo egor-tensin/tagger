@@ -66,6 +66,7 @@ main() {
         -regex '.*/tst-.*\.sh$' \
         -regextype posix-basic \
         -printf '%P\0' |
+        sort -z |
     while IFS= read -d '' -r test_file; do
         test_files+=("$test_file")
     done
