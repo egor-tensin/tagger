@@ -244,7 +244,9 @@ def parse_args(argv=None):
         metavar="STRING",
         help="""tag prefix ("v" by default)""",
     )
-    parser.add_argument("-s", "--strict", action='store_true', help="error out on malformed tags")
+    parser.add_argument(
+        "-s", "--strict", action="store_true", help="error out on malformed tags"
+    )
     parser.add_argument(
         "release_scope", choices=ReleaseScope, type=ReleaseScope, help="release scope"
     )
