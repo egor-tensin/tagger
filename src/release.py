@@ -15,6 +15,7 @@ creating the proper tag for you.
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
 import logging
 import os
@@ -180,6 +181,12 @@ class VersionList:
         return version
 
 
+@dataclass
+class TagParams:
+    lightweight: bool = False
+    message: str = "{}"
+
+
 class TagList:
     DEFAULT_PREFIX = "v"
     DEFAULT_VERSION = Version((0, 0, 0))
@@ -224,10 +231,16 @@ class TagList:
 
         return TagList(repo_dir, prefix, VersionList(versions))
 
-    def release_next(self, scope):
+    def release_next(self, scope, tag_params):
         version = self._versions.release_next(scope)
         tag_name = f"{self._prefix}{version}"
-        cmd = ["git", "-C", self._repo_dir, "tag", tag_name]
+
+        cmd = ["git", "-C", self._repo_dir]
+        if tag_params.lightweight:
+            cmd += ["tag", tag_name]
+        else:
+            cmd += ["tag", "-a", "-m", tag_params.message.format(tag_name), tag_name]
+
         run(*cmd)
 
 
@@ -235,7 +248,13 @@ def parse_args(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    epilog = R"""
+The tag message (--message) can include Python's str.format() placeholders.
+It will be format()ted with a single argument: the full tag name (for example,
+v1.2.3).
+"""
+
+    parser = argparse.ArgumentParser(description=__doc__, epilog=epilog)
 
     parser.add_argument(
         "-p",
@@ -245,7 +264,23 @@ def parse_args(argv=None):
         help="""tag prefix ("v" by default)""",
     )
     parser.add_argument(
-        "-s", "--strict", action="store_true", help="error out on malformed tags"
+        "-s",
+        "--strict",
+        action="store_true",
+        help="error out on discovering malformed tags",
+    )
+    parser.add_argument(
+        "-l",
+        "--lightweight",
+        action="store_true",
+        help="create lightweight tags (annotated by default)",
+    )
+    parser.add_argument(
+        "-m",
+        "--message",
+        metavar="FMT",
+        default="{}",
+        help="tag message format string",
     )
     parser.add_argument(
         "release_scope", choices=ReleaseScope, type=ReleaseScope, help="release scope"
@@ -264,7 +299,8 @@ def main(argv=None):
     args = parse_args(argv)
     with setup_logging():
         tags = TagList.parse(args.repo_dir, args.prefix, strict=args.strict)
-        tags.release_next(args.release_scope)
+        tag_params = TagParams(args.lightweight, args.message)
+        tags.release_next(args.release_scope, tag_params)
     return 0
 
 

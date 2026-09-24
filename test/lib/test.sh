@@ -46,18 +46,62 @@ test_make_commit() {
     git -C "$repo" commit -q -m "$file"
 }
 
-test_get_tags() {
+_validate_tag_kind() {
     if [ "$#" -ne 1 ]; then
-        log "usage: ${FUNCNAME[0]} REPO_DIR"
+        log "usage: ${FUNCNAME[0]} {lightweight|annotated}"
+        return 1
+    fi
+
+    case "$1" in
+        lightweight|annotated)
+            echo "$1"
+            ;;
+        *)
+            log "${FUNCNAME[1]}: invalid tag type: $kind"
+            return 1
+            ;;
+    esac
+}
+
+test_get_tags() {
+    if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR [{lightweight|annotated}]"
         return 1
     fi
 
     local repo="$1"
 
+    local kind=
+    [ "$#" -gt 1 ] && kind="$( _validate_tag_kind "$2" )"
+
     log "Reading tags in $repo..."
-    git -C "$repo" for-each-ref '--format=%(refname)' refs/tags/ \
-        | sed -e 's/^refs\/tags\///' \
-        | sort -V
+
+    local objecttype
+    local refname
+
+    git -C "$repo" for-each-ref refs/tags/ \
+        '--format=%(objecttype)%0a%(refname:short)' |
+    while IFS= read -r objecttype; do
+        IFS= read -r refname
+
+        case "$kind-$objecttype" in
+            lightweight-commit|annotated-tag|-*)
+                echo "$refname"
+                ;;
+        esac
+    done | sort -V
+}
+
+test_get_tag_message() {
+    if [ "$#" -ne 2 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR TAG"
+        return 1
+    fi
+
+    local repo="$1"
+    local tag="$2"
+
+    git -C "$repo" for-each-ref "refs/tags/$tag" '--format=%(contents)'
 }
 
 test_create_tags() {
@@ -75,21 +119,24 @@ test_create_tags() {
         touch -- "$repo/$tag"
         git -C "$repo" add "$repo/$tag"
         git -C "$repo" commit -q -m "$tag"
-        git -C "$repo" tag "$tag"
+        git -C "$repo" tag -a -m "$tag" "$tag"
     done
 }
 
 test_validate_tags() {
-    if [ "$#" -ne 2 ]; then
-        log "usage: ${FUNCNAME[0]} REPO_DIR EXPECTED_TAGS"
+    if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR EXPECTED_TAGS [{lightweight,annotated}]"
         return 1
     fi
 
     local repo="$1"
     local expected="$2"
 
+    local kind=
+    [ "$#" -gt 2 ] && kind="$( _validate_tag_kind "$3" )"
+
     local actual
-    actual="$( test_get_tags "$repo" | paste -s -d ',' )"
+    actual="$( test_get_tags "$repo" $kind | paste -s -d ',' )"
 
     log "Validating tags in $repo..."
 
@@ -98,6 +145,27 @@ test_validate_tags() {
     fail "Unexpected tags"
     fail_details "Expected tags: $expected"
     fail_details "Actual tags:   $actual"
+    return 1
+}
+
+test_validate_tag_message() {
+    if [ "$#" -lt 3 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR TAG EXPECTED_MSG"
+        return 1
+    fi
+
+    local repo="$1"
+    local tag="$2"
+    local expected="$3"
+
+    local actual
+    actual="$( test_get_tag_message "$repo" "$tag" )"
+
+    [ "$actual" == "$expected" ] && return 0
+
+    fail "Unexpected message for tag $tag:"
+    fail_details "Expected: $expected"
+    fail_details "Actual: $actual"
     return 1
 }
 
