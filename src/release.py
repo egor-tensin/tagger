@@ -259,9 +259,9 @@ v1.2.3).
     parser.add_argument(
         "-p",
         "--prefix",
-        default="v",
-        metavar="STRING",
-        help="""tag prefix ("v" by default)""",
+        default=TagList.DEFAULT_PREFIX,
+        metavar="STR",
+        help=f"""tag prefix ("{TagList.DEFAULT_PREFIX}" by default)""",
     )
     parser.add_argument(
         "-s",
