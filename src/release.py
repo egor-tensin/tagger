@@ -88,7 +88,7 @@ class ReleaseScope(Enum):
             return 1
         if self is ReleaseScope.PATCH:
             return 2
-        raise NotImplemented(f"Unknown release scope: {self}")
+        raise NotImplementedError(f"Unknown release scope: {self}")
 
 
 class Version:
@@ -114,9 +114,8 @@ class Version:
         if not match:
             if strict:
                 raise ValueError(invalid_msg)
-            else:
-                logging.warning("%s", invalid_msg)
-                return None
+            logging.warning("%s", invalid_msg)
+            return None
         assert len(match.groups()) == 3
 
         nums = [int(n) if n is not None else None for n in match.groups()]
@@ -248,8 +247,7 @@ class TagManager:
                 msg = f"Unexpected tag name: {refname}"
                 if self._strict:
                     raise RuntimeError(msg)
-                else:
-                    logging.warning("%s", msg)
+                logging.warning("%s", msg)
             yield refname.removeprefix(self._prefix), objecttype
 
     @staticmethod
