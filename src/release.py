@@ -94,13 +94,15 @@ class ReleaseScope(Enum):
 class Version:
     def __init__(self, nums):
         nums = list(nums)
+        if len(nums) > len(ReleaseScope):
+            raise ValueError(f"Too many version components: {nums}")
+
         while nums and nums[-1] is None:
             nums.pop()
-
         if not nums:
             raise ValueError("Must provide at least the major version number")
         if any((n is None for n in nums)):
-            raise ValueError("Some version components are invalid")
+            raise ValueError(f"Some version components are invalid: {nums}")
 
         self._nums = tuple(nums)
 
@@ -138,7 +140,7 @@ class Version:
         return hash(self._nums)
 
     def extend(self, new_len):
-        if new_len < 0:
+        if new_len < 1 or new_len > len(ReleaseScope):
             raise ValueError(f"Invalid version length {new_len}")
         if len(self._nums) >= new_len:
             return Version(self._nums)
@@ -147,6 +149,7 @@ class Version:
         return Version(nums)
 
     def upgrade(self, idx):
+        assert idx < len(ReleaseScope)
         if idx < 0 or len(self._nums) < idx + 1:
             raise ValueError(
                 f"Can't increment version number at index {idx} for version {self}"
@@ -157,91 +160,107 @@ class Version:
         return Version(nums)
 
 
-class VersionList:
-    def __init__(self, versions):
-        self._lst = sorted(versions)
-        self._set = set(versions)
-        if len(self._set) != len(self._lst):
-            raise ValueError("Duplicate tags found")
-
-    def __len__(self):
-        return len(self._lst)
-
-    @property
-    def latest(self):
-        if not self:
-            raise RuntimeError("No versions, can't get the latest")
-        return self._lst[-1]
-
-    def release_next(self, scope):
-        version = scope.next_version(self.latest)
-        assert version not in self._set
-        self._lst.append(version)
-        self._set.add(version)
-        return version
-
-
 @dataclass
-class TagParams:
-    lightweight: bool = False
-    message: str = "{}"
+class Tag:
+    version: Version
+    lightweight: bool
+
+    def get_git_cmd(self, message=None):
+        cmd = ["git", "tag"]
+        if self.lightweight:
+            return cmd
+        if message is None:
+            raise ValueError("Must provide a tag message for annotated tags")
+        cmd += ["-a", "-m", message]
+        return cmd
 
 
 class TagList:
     DEFAULT_PREFIX = "v"
-    DEFAULT_VERSION = Version((0, 0, 0))
+    DEFAULT_VERSION = Version((0 for _ in range(len(ReleaseScope))))
 
-    def __init__(self, repo_dir, prefix, versions):
-        self._repo_dir = repo_dir
+    def __init__(self, prefix, tags):
         self._prefix = prefix
-        self._versions = versions
+        self._tags = sorted(tags, key=lambda tag: tag.version)
 
     @staticmethod
-    def parse(repo_dir=None, prefix=None, strict=False):
-        if repo_dir is None:
-            repo_dir = os.getcwd()
-        if prefix is None:
-            prefix = TagList.DEFAULT_PREFIX
-
+    def _git_query_tags():
         cmd = [
             "git",
-            "-C",
-            repo_dir,
             "for-each-ref",
-            "--format=%(refname)",
+            "--format=%(refname:short) %(objecttype)",
             "refs/tags/",
         ]
-        output = run(*cmd)
-        versions = output.splitlines()
 
-        strip = f"refs/tags/{prefix}"
-        for version in versions:
-            if not version.startswith(strip):
-                msg = f"Unexpected git for-each-ref output: {version}"
+        output = run(*cmd)
+        lines = output.splitlines()
+
+        for line in lines:
+            line = line.split()
+            assert len(line) == 2
+            yield line
+
+    @staticmethod
+    def _git_filter_tags(tags, prefix, strict):
+        for refname, objecttype in tags:
+            if not refname.startswith(prefix):
+                msg = f"Unexpected tag name: {refname}"
                 if strict:
                     raise RuntimeError(msg)
                 else:
                     logging.warning("%s", msg)
-        versions = [version.removeprefix(strip) for version in versions]
+            yield refname.removeprefix(prefix), objecttype
 
-        versions = [Version.parse(version, strict=strict) for version in versions]
-        versions = [version for version in versions if version is not None]
-        if not versions:
-            versions = [TagList.DEFAULT_VERSION]
+    @staticmethod
+    def _is_tag_lightweight(objecttype):
+        if objecttype == "commit":
+            return True
+        if objecttype == "tag":
+            return False
+        raise ValueError(f"Unexpected %(objecttype) value: {objecttype}")
 
-        return TagList(repo_dir, prefix, VersionList(versions))
+    @staticmethod
+    def _git_parse_tags(tags, strict):
+        for refname, objecttype in tags:
+            version = Version.parse(refname, strict=strict)
+            if version is None:
+                continue
+            lightweight = TagList._is_tag_lightweight(objecttype)
+            yield Tag(version, lightweight)
 
-    def release_next(self, scope, tag_params):
-        version = self._versions.release_next(scope)
+    @staticmethod
+    def parse(prefix=None, strict=False):
+        if prefix is None:
+            prefix = TagList.DEFAULT_PREFIX
+
+        tags = TagList._git_query_tags()
+        tags = TagList._git_filter_tags(tags, prefix, strict)
+        tags = TagList._git_parse_tags(tags, strict)
+        tags = list(tags)
+        if not tags:
+            tags = [Tag(TagList.DEFAULT_VERSION, lightweight=False)]
+
+        return TagList(prefix, tags)
+
+    def __len__(self):
+        return len(self._tags)
+
+    @property
+    def latest(self):
+        if not self:
+            raise RuntimeError("No tags, can't get the latest")
+        return self._tags[-1]
+
+    def release_next(self, scope, lightweight=False, message_fmt="{}"):
+        version = scope.next_version(self.latest.version)
         tag_name = f"{self._prefix}{version}"
+        tag = Tag(version, lightweight)
 
-        cmd = ["git", "-C", self._repo_dir]
-        if tag_params.lightweight:
-            cmd += ["tag", tag_name]
-        else:
-            cmd += ["tag", "-a", "-m", tag_params.message.format(tag_name), tag_name]
-
+        cmd = tag.get_git_cmd(message=message_fmt.format(tag_name))
+        cmd.append(tag_name)
         run(*cmd)
+
+        self._tags.append(tag)
 
 
 def parse_args(argv=None):
@@ -279,11 +298,15 @@ v1.2.3).
         "-m",
         "--message",
         metavar="FMT",
+        dest="message_fmt",
         default="{}",
         help="tag message format string",
     )
     parser.add_argument(
-        "release_scope", choices=ReleaseScope, type=ReleaseScope, help="release scope"
+        "release_scope",
+        choices=ReleaseScope,
+        type=ReleaseScope,
+        help="release scope",
     )
     parser.add_argument(
         "repo_dir",
@@ -298,9 +321,14 @@ v1.2.3).
 def main(argv=None):
     args = parse_args(argv)
     with setup_logging():
-        tags = TagList.parse(args.repo_dir, args.prefix, strict=args.strict)
-        tag_params = TagParams(args.lightweight, args.message)
-        tags.release_next(args.release_scope, tag_params)
+        if args.repo_dir is not None:
+            os.chdir(args.repo_dir)
+        tags = TagList.parse(prefix=args.prefix, strict=args.strict)
+        tags.release_next(
+            args.release_scope,
+            lightweight=args.lightweight,
+            message_fmt=args.message_fmt,
+        )
     return 0
 
 
