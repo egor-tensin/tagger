@@ -174,7 +174,7 @@ class Tag:
     version: Version
     lightweight: bool
 
-    def get_cmd_create(self, message=None, target=None):
+    def git_cmd_create(self, message=None, target=None):
         cmd = ["git", "tag"]
         if self.lightweight:
             return cmd + [self.name]
@@ -186,7 +186,7 @@ class Tag:
             # ^^^ Avoid tags-to-tags, which is somehow bad, idk.
         return cmd
 
-    def get_cmd_update(self, target):
+    def git_cmd_update(self, target):
         cmd = ["git", "tag"]
         if self.lightweight:
             return cmd + ["-f", self.name, target.name]
@@ -281,7 +281,7 @@ class TagManager:
         if tag.version in self._tag_map:
             raise RuntimeError(f"Tag {tag.name} already exists")
 
-        cmd = tag.get_cmd_create(
+        cmd = tag.git_cmd_create(
             message=self._message_fmt.format(tag.name), target=target
         )
         run(*cmd)
@@ -296,7 +296,7 @@ class TagManager:
         if child.version not in self._tag_map:
             raise RuntimeError(f"Tag {child.name} doesn't exist")
 
-        cmd = parent.get_cmd_update(child)
+        cmd = parent.git_cmd_update(child)
         env = os.environ.copy()
         env["GIT_EDITOR"] = "true"
         run(*cmd, env=env)
@@ -307,20 +307,20 @@ class TagManager:
         self.create(tag)
         return tag
 
-    def retag(self, child):
+    def retag_parents(self, child):
         while child.version.has_parent:
             parent_version = child.version.get_parent()
-            if parent_version not in self._tag_map:
-                parent = Tag(
-                    self._format_tag_name(parent_version),
-                    parent_version,
-                    self._lightweight,
-                )
-                self.create(parent, target=child)
+            if parent_version in self._tag_map:
+                parent = self._tag_map[parent_version]
+                self.update(parent, child)
                 child = parent
                 continue
-            parent = self._tag_map[parent_version]
-            self.update(parent, child)
+            parent = Tag(
+                self._format_tag_name(parent_version),
+                parent_version,
+                self._lightweight,
+            )
+            self.create(parent, target=child)
             child = parent
 
 
@@ -398,7 +398,7 @@ def main(argv=None):
         )
         new = tags.release_next(args.release_scope)
         if args.retag:
-            tags.retag(new)
+            tags.retag_parents(new)
     return 0
 
 
