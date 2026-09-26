@@ -183,13 +183,16 @@ class Tag:
         cmd += ["-a", "-m", message, self.name]
         if target is not None:
             cmd.append(target.name + "^{}")
+            # ^^^ Avoid tags-to-tags, which is somehow bad, idk.
         return cmd
 
     def get_cmd_update(self, target):
         cmd = ["git", "tag"]
         if self.lightweight:
             return cmd + ["-f", self.name, target.name]
-        cmd += ["-a", "-f", self.name, target.name + "^{}"]
+        cmd += ["-a", "-f", self.name]
+        cmd.append(target.name + "^{}")
+        # ^^^ Avoid tags-to-tags, which is somehow bad, idk.
         return cmd
 
 
