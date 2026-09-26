@@ -129,6 +129,7 @@ class Version:
         return self._nums == other._nums
 
     def __lt__(self, other):
+        # Attempting to sort the way `sort -V` does it (so v1 < v1.0 for example).
         for a, b in zip(self._nums, other._nums):
             if a > b:
                 return False
@@ -159,29 +160,67 @@ class Version:
         nums.extend([0 for i in range(len(self._nums) - idx - 1)])
         return Version(nums)
 
+    @property
+    def has_parent(self):
+        return len(self._nums) > 1
+
+    def get_parent(self):
+        return Version(self._nums[:-1])
+
 
 @dataclass
 class Tag:
+    name: str
     version: Version
     lightweight: bool
 
-    def get_git_cmd(self, message=None):
+    def get_cmd_create(self, message=None, target=None):
         cmd = ["git", "tag"]
         if self.lightweight:
-            return cmd
+            return cmd + [self.name]
         if message is None:
             raise ValueError("Must provide a tag message for annotated tags")
-        cmd += ["-a", "-m", message]
+        cmd += ["-a", "-m", message, self.name]
+        if target is not None:
+            cmd.append(target.name + "^{}")
+        return cmd
+
+    def get_cmd_update(self, target):
+        cmd = ["git", "tag"]
+        if self.lightweight:
+            return cmd + ["-f", self.name, target.name]
+        cmd += ["-a", "-f", self.name, target.name + "^{}"]
         return cmd
 
 
-class TagList:
+class TagManager:
     DEFAULT_PREFIX = "v"
     DEFAULT_VERSION = Version((0 for _ in range(len(ReleaseScope))))
+    DEFAULT_MESSAGE_FMT = "{}"
 
-    def __init__(self, prefix, tags):
+    def __init__(self, prefix=None, strict=False, lightweight=False, message_fmt=None):
+        if prefix is None:
+            prefix = TagManager.DEFAULT_PREFIX
         self._prefix = prefix
-        self._tags = sorted(tags, key=lambda tag: tag.version)
+        self._strict = strict
+        self._lightweight = lightweight
+        if message_fmt is None:
+            message_fmt = TagManager.DEFAULT_MESSAGE_FMT
+        self._message_fmt = message_fmt
+
+        tags = self._git_query_tags()
+        tags = self._git_filter_tags(tags)
+        tags = self._git_parse_tags(tags)
+        tags = list(tags)
+        if not tags:
+            version = TagManager.DEFAULT_VERSION
+            tags = [Tag(self._format_tag_name(version), version, lightweight)]
+
+        self._tag_lst = sorted(tags, key=lambda tag: tag.version)
+        self._tag_map = {tag.version: tag for tag in tags}
+
+    def _format_tag_name(self, version):
+        return f"{self._prefix}{version}"
 
     @staticmethod
     def _git_query_tags():
@@ -200,16 +239,15 @@ class TagList:
             assert len(line) == 2
             yield line
 
-    @staticmethod
-    def _git_filter_tags(tags, prefix, strict):
+    def _git_filter_tags(self, tags):
         for refname, objecttype in tags:
-            if not refname.startswith(prefix):
+            if not refname.startswith(self._prefix):
                 msg = f"Unexpected tag name: {refname}"
-                if strict:
+                if self._strict:
                     raise RuntimeError(msg)
                 else:
                     logging.warning("%s", msg)
-            yield refname.removeprefix(prefix), objecttype
+            yield refname.removeprefix(self._prefix), objecttype
 
     @staticmethod
     def _is_tag_lightweight(objecttype):
@@ -219,48 +257,68 @@ class TagList:
             return False
         raise ValueError(f"Unexpected %(objecttype) value: {objecttype}")
 
-    @staticmethod
-    def _git_parse_tags(tags, strict):
+    def _git_parse_tags(self, tags):
         for refname, objecttype in tags:
-            version = Version.parse(refname, strict=strict)
+            version = Version.parse(refname, strict=self._strict)
             if version is None:
                 continue
-            lightweight = TagList._is_tag_lightweight(objecttype)
-            yield Tag(version, lightweight)
-
-    @staticmethod
-    def parse(prefix=None, strict=False):
-        if prefix is None:
-            prefix = TagList.DEFAULT_PREFIX
-
-        tags = TagList._git_query_tags()
-        tags = TagList._git_filter_tags(tags, prefix, strict)
-        tags = TagList._git_parse_tags(tags, strict)
-        tags = list(tags)
-        if not tags:
-            tags = [Tag(TagList.DEFAULT_VERSION, lightweight=False)]
-
-        return TagList(prefix, tags)
+            lightweight = self._is_tag_lightweight(objecttype)
+            yield Tag(self._format_tag_name(version), version, lightweight)
 
     def __len__(self):
-        return len(self._tags)
+        return len(self._tag_lst)
 
     @property
     def latest(self):
         if not self:
             raise RuntimeError("No tags, can't get the latest")
-        return self._tags[-1]
+        return self._tag_lst[-1]
 
-    def release_next(self, scope, lightweight=False, message_fmt="{}"):
-        version = scope.next_version(self.latest.version)
-        tag_name = f"{self._prefix}{version}"
-        tag = Tag(version, lightweight)
+    def create(self, tag, target=None):
+        if tag.version in self._tag_map:
+            raise RuntimeError(f"Tag {tag.name} already exists")
 
-        cmd = tag.get_git_cmd(message=message_fmt.format(tag_name))
-        cmd.append(tag_name)
+        cmd = tag.get_cmd_create(
+            message=self._message_fmt.format(tag.name), target=target
+        )
         run(*cmd)
 
-        self._tags.append(tag)
+        self._tag_lst.append(tag)
+        self._tag_lst.sort(key=lambda tag: tag.version)
+        self._tag_map[tag.version] = tag
+
+    def update(self, parent, child):
+        if parent.version not in self._tag_map:
+            raise RuntimeError(f"Tag {parent.name} doesn't exist")
+        if child.version not in self._tag_map:
+            raise RuntimeError(f"Tag {child.name} doesn't exist")
+
+        cmd = parent.get_cmd_update(child)
+        env = os.environ.copy()
+        env["GIT_EDITOR"] = "true"
+        run(*cmd, env=env)
+
+    def release_next(self, scope):
+        version = scope.next_version(self.latest.version)
+        tag = Tag(f"{self._prefix}{version}", version, self._lightweight)
+        self.create(tag)
+        return tag
+
+    def retag(self, child):
+        while child.version.has_parent:
+            parent_version = child.version.get_parent()
+            if parent_version not in self._tag_map:
+                parent = Tag(
+                    self._format_tag_name(parent_version),
+                    parent_version,
+                    self._lightweight,
+                )
+                self.create(parent, target=child)
+                child = parent
+                continue
+            parent = self._tag_map[parent_version]
+            self.update(parent, child)
+            child = parent
 
 
 def parse_args(argv=None):
@@ -278,9 +336,9 @@ v1.2.3).
     parser.add_argument(
         "-p",
         "--prefix",
-        default=TagList.DEFAULT_PREFIX,
+        default=TagManager.DEFAULT_PREFIX,
         metavar="STR",
-        help=f"""tag prefix ("{TagList.DEFAULT_PREFIX}" by default)""",
+        help=f"""tag prefix ("{TagManager.DEFAULT_PREFIX}" by default)""",
     )
     parser.add_argument(
         "-s",
@@ -299,8 +357,14 @@ v1.2.3).
         "--message",
         metavar="FMT",
         dest="message_fmt",
-        default="{}",
+        default=TagManager.DEFAULT_MESSAGE_FMT,
         help="tag message format string",
+    )
+    parser.add_argument(
+        "-r",
+        "--retag",
+        action="store_true",
+        help="update parent version tags (i.e. for tag v2.1.1, update tags v2 & v2.1 to point to it)",
     )
     parser.add_argument(
         "release_scope",
@@ -323,12 +387,15 @@ def main(argv=None):
     with setup_logging():
         if args.repo_dir is not None:
             os.chdir(args.repo_dir)
-        tags = TagList.parse(prefix=args.prefix, strict=args.strict)
-        tags.release_next(
-            args.release_scope,
+        tags = TagManager(
+            prefix=args.prefix,
+            strict=args.strict,
             lightweight=args.lightweight,
             message_fmt=args.message_fmt,
         )
+        new = tags.release_next(args.release_scope)
+        if args.retag:
+            tags.retag(new)
     return 0
 
 

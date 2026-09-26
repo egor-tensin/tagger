@@ -104,6 +104,18 @@ test_get_tag_message() {
     git -C "$repo" for-each-ref "refs/tags/$tag" '--format=%(contents)'
 }
 
+test_get_tag_commit() {
+    if [ "$#" -ne 2 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR TAG"
+        return 1
+    fi
+
+    local repo="$1"
+    local tag="$2"
+
+    git -C "$repo" rev-list -n 1 "$tag" --
+}
+
 test_create_tags() {
     if [ "$#" -lt 1 ]; then
         log "usage: ${FUNCNAME[0]} REPO_DIR [TAG...]"
@@ -158,6 +170,8 @@ test_validate_tag_message() {
     local tag="$2"
     local expected="$3"
 
+    log "Validating tag message for tag: $tag"
+
     local actual
     actual="$( test_get_tag_message "$repo" "$tag" )"
 
@@ -167,6 +181,37 @@ test_validate_tag_message() {
     fail_details "Expected: $expected"
     fail_details "Actual: $actual"
     return 1
+}
+
+test_validate_tags_same_target() {
+    if [ "$#" -lt 3 ]; then
+        log "usage: ${FUNCNAME[0]} REPO_DIR TAG1 TAG2 [TAG...]"
+        return 1
+    fi
+
+    local repo="$1"
+    shift
+    local tgt=
+
+    local tag
+    for tag; do
+        log "Validating tag target for tag: $tag"
+
+        local output
+        output="$( test_get_tag_commit "$repo" "$tag" )"
+
+        if [ -z "$tgt" ]; then
+            tgt="$output"
+            continue
+        fi
+
+        if [ "$tgt" != "$output" ]; then
+            fail "Tag '$tag' doesn't point to the expected revision"
+            fail_details "Expected: $tgt"
+            fail_details "Actual: $output"
+            return 1
+        fi
+    done
 }
 
 test_run_release_script() {
